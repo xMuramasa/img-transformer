@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>img-transformer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --panel-2: #232732;
+    --text: #e6e8ee;
+    --muted: #8a90a0;
+    --accent: #4f8cff;
+    --accent-hover: #6aa0ff;
+    --border: #2c313d;
+    --ok: #4ade80;
+    --err: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main {
+    max-width: 760px;
+    margin: 32px auto;
+    padding: 0 24px;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 10px 16px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 32px;
+    text-align: center;
+    color: var(--muted);
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .drop.dragover { border-color: var(--accent); background: var(--panel-2); color: var(--text); }
+  .drop input[type=file] { display: none; }
+  .files {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .options {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input[type=number], select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.ok { color: var(--ok); }
+  .status.err { color: var(--err); }
+  .report {
+    margin-top: 16px;
+    padding: 12px;
+    background: var(--panel-2);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    display: none;
+  }
+  .report.visible { display: block; }
+  .report strong { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>img-transformer</h1>
+  <p>Convert and resize images locally. Single file, multiple files, or a zip archive.</p>
+</header>
+<main>
+  <div class="tabs">
+    <button class="tab active" data-mode="image">Single image</button>
+    <button class="tab" data-mode="files">Multiple files</button>
+    <button class="tab" data-mode="zip">Zip archive</button>
+  </div>
+
+  <div class="panel">
+    <div class="drop" id="drop">
+      <div id="drop-label">Drop a file here or click to choose</div>
+      <input type="file" id="file-input" />
+      <div class="files" id="files"></div>
+    </div>
+
+    <div class="options">
+      <div>
+        <label for="format">Target format</label>
+        <select id="format">
+          <option value="webp" selected>WebP</option>
+          <option value="png">PNG</option>
+          <option value="jpeg">JPEG</option>
+          <option value="gif">GIF</option>
+          <option value="bmp">BMP</option>
+          <option value="tiff">TIFF</option>
+        </select>
+      </div>
+      <div>
+        <label for="width">Width (px, optional)</label>
+        <input type="number" id="width" min="1" placeholder="auto" />
+      </div>
+      <div>
+        <label for="height">Height (px, optional)</label>
+        <input type="number" id="height" min="1" placeholder="auto" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="submit" disabled>Convert</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <div class="report" id="report"></div>
+  </div>
+</main>
+
+<script>
+(() => {
+  const state = { mode: "image", files: [] };
+  const tabs = document.querySelectorAll(".tab");
+  const drop = document.getElementById("drop");
+  const dropLabel = document.getElementById("drop-label");
+  const input = document.getElementById("file-input");
+  const filesEl = document.getElementById("files");
+  const submit = document.getElementById("submit");
+  const statusEl = document.getElementById("status");
+  const reportEl = document.getElementById("report");
+
+  function modeConfig(mode) {
+    if (mode === "image") return { multiple: false, accept: "image/*", url: "/api/convert/image", filePart: "file", label: "Drop an image here or click to choose" };
+    if (mode === "files") return { multiple: true,  accept: "image/*", url: "/api/convert/files", filePart: "files", label: "Drop one or more images, or click to choose" };
+    return { multiple: false, accept: ".zip,application/zip", url: "/api/convert/zip", filePart: "file", label: "Drop a .zip here or click to choose" };
+  }
+
+  function render() {
+    const cfg = modeConfig(state.mode);
+    input.multiple = cfg.multiple;
+    input.accept = cfg.accept;
+    dropLabel.textContent = cfg.label;
+    filesEl.textContent = state.files.length
+      ? state.files.map(f => `${f.name} (${(f.size/1024).toFixed(1)} KB)`).join(", ")
+      : "";
+    submit.disabled = state.files.length === 0;
+  }
+
+  tabs.forEach(t => t.addEventListener("click", () => {
+    tabs.forEach(x => x.classList.remove("active"));
+    t.classList.add("active");
+    state.mode = t.dataset.mode;
+    state.files = [];
+    statusEl.textContent = "";
+    statusEl.className = "status";
+    reportEl.classList.remove("visible");
+    render();
+  }));
+
+  drop.addEventListener("click", () => input.click());
+  drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("dragover"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("dragover"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault();
+    drop.classList.remove("dragover");
+    const cfg = modeConfig(state.mode);
+    const dropped = Array.from(e.dataTransfer.files);
+    state.files = cfg.multiple ? dropped : dropped.slice(0, 1);
+    render();
+  });
+  input.addEventListener("change", () => {
+    state.files = Array.from(input.files);
+    render();
+  });
+
+  function downloadBlob(blob, name) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function filenameFromHeaders(headers, fallback) {
+    const cd = headers.get("content-disposition") || "";
+    const m = cd.match(/filename="?([^"]+)"?/i);
+    return m ? m[1] : fallback;
+  }
+
+  function showReport(headers) {
+    const raw = headers.get("X-Conversion-Report");
+    if (!raw) return;
+    try {
+      const r = JSON.parse(raw);
+      reportEl.innerHTML =
+        `<strong>Converted:</strong> ${r.converted.length} &nbsp; ` +
+        `<strong>Skipped:</strong> ${r.skipped.length} &nbsp; ` +
+        `<strong>Failed:</strong> ${r.failed.length}` +
+        (r.failed.length ? "<br>" + r.failed.map(f => `· ${f.name}: ${f.error}`).join("<br>") : "");
+      reportEl.classList.add("visible");
+    } catch { /* ignore */ }
+  }
+
+  submit.addEventListener("click", async () => {
+    const cfg = modeConfig(state.mode);
+    if (state.files.length === 0) return;
+
+    const fd = new FormData();
+    if (cfg.multiple) {
+      for (const f of state.files) fd.append(cfg.filePart, f);
+    } else {
+      fd.append(cfg.filePart, state.files[0]);
+    }
+    fd.append("target_format", document.getElementById("format").value);
+    const w = document.getElementById("width").value;
+    const h = document.getElementById("height").value;
+    if (w) fd.append("width", w);
+    if (h) fd.append("height", h);
+
+    submit.disabled = true;
+    statusEl.className = "status";
+    statusEl.textContent = "Converting…";
+    reportEl.classList.remove("visible");
+
+    try {
+      const res = await fetch(cfg.url, { method: "POST", body: fd });
+      if (!res.ok) {
+        let msg = `${res.status} ${res.statusText}`;
+        try { const j = await res.json(); if (j.detail) msg = j.detail; } catch {}
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const fallback = state.mode === "image" ? "converted" : "converted.zip";
+      downloadBlob(blob, filenameFromHeaders(res.headers, fallback));
+      statusEl.className = "status ok";
+      statusEl.textContent = "Done.";
+      showReport(res.headers);
+    } catch (e) {
+      statusEl.className = "status err";
+      statusEl.textContent = `Error: ${e.message}`;
+    } finally {
+      submit.disabled = state.files.length === 0;
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

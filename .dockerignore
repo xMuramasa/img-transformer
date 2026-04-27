@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+.ruff_cache
+.pytest_cache
+__pycache__
+tests
+*.ipynb
+*.zip
+*_converted/
+README.md
+Dockerfile
+.dockerignore
+.DS_Store
+.vscode
