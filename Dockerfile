@@ -4,7 +4,8 @@ FROM python:3.14-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    U2NET_HOME=/app/.u2net
 
 WORKDIR /app
 
@@ -15,7 +16,12 @@ RUN pip install --no-cache-dir \
       "uvicorn[standard]>=0.27" \
       "pillow>=10.0" \
       "python-multipart>=0.0.9" \
-      "pydantic>=2.6"
+      "pydantic>=2.6" \
+      "rembg[cpu]>=2.0.59" \
+      "onnxruntime>=1.17"
+
+# Pre-download the U2Net model so first request doesn't pay the cost.
+RUN python -c "from rembg import new_session; new_session('u2net')"
 
 COPY app ./app
 COPY transform ./transform
