@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
@@ -14,6 +15,7 @@ from pydantic import ValidationError
 
 from app.schemas import ConvertOptions
 from transform import convert_image, convert_many, convert_zip
+from transform.background import BackgroundRemovalUnavailable
 from transform.image import extension_for
 
 # --- Limits --------------------------------------------------------------
@@ -27,9 +29,19 @@ _STATIC_DIR = Path(__file__).parent / "static"
 
 
 # --- Helpers -------------------------------------------------------------
-def _parse_options(target_format: str, width: int | None, height: int | None) -> ConvertOptions:
+def _parse_options(
+    target_format: str,
+    width: int | None,
+    height: int | None,
+    remove_bg: bool = False,
+) -> ConvertOptions:
     try:
-        return ConvertOptions(target_format=target_format, width=width, height=height)
+        return ConvertOptions(
+            target_format=target_format,
+            width=width,
+            height=height,
+            remove_bg=remove_bg,
+        )
     except (ValidationError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -66,18 +78,23 @@ async def api_convert_image(
     target_format: str = Form(...),
     width: int | None = Form(None),
     height: int | None = Form(None),
+    remove_bg: bool = Form(False),
 ):
-    opts = _parse_options(target_format, width, height)
+    opts = _parse_options(target_format, width, height, remove_bg)
     data = await _read_capped(file, MAX_IMAGE_BYTES)
     try:
-        out = convert_image(
+        out = await run_in_threadpool(
+            convert_image,
             data,
             target_format=opts.target_format,
             width=opts.width,
             height=opts.height,
+            remove_bg=opts.remove_bg,
         )
     except UnidentifiedImageError:
         raise HTTPException(status_code=400, detail="File is not a recognizable image.")
+    except BackgroundRemovalUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -97,10 +114,11 @@ async def api_convert_files(
     target_format: str = Form(...),
     width: int | None = Form(None),
     height: int | None = Form(None),
+    remove_bg: bool = Form(False),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    opts = _parse_options(target_format, width, height)
+    opts = _parse_options(target_format, width, height, remove_bg)
 
     payloads: list[tuple[str, bytes]] = []
     total = 0
@@ -111,12 +129,17 @@ async def api_convert_files(
             raise HTTPException(status_code=413, detail="Combined upload too large.")
         payloads.append((f.filename or "image", data))
 
-    zip_bytes, report = convert_many(
-        payloads,
-        target_format=opts.target_format,
-        width=opts.width,
-        height=opts.height,
-    )
+    try:
+        zip_bytes, report = await run_in_threadpool(
+            convert_many,
+            payloads,
+            target_format=opts.target_format,
+            width=opts.width,
+            height=opts.height,
+            remove_bg=opts.remove_bg,
+        )
+    except BackgroundRemovalUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     return StreamingResponse(
         BytesIO(zip_bytes),
         media_type="application/zip",
@@ -133,16 +156,21 @@ async def api_convert_zip(
     target_format: str = Form(...),
     width: int | None = Form(None),
     height: int | None = Form(None),
+    remove_bg: bool = Form(False),
 ):
-    opts = _parse_options(target_format, width, height)
+    opts = _parse_options(target_format, width, height, remove_bg)
     data = await _read_capped(file, MAX_ZIP_BYTES)
     try:
-        zip_bytes, report = convert_zip(
+        zip_bytes, report = await run_in_threadpool(
+            convert_zip,
             data,
             target_format=opts.target_format,
             width=opts.width,
             height=opts.height,
+            remove_bg=opts.remove_bg,
         )
+    except BackgroundRemovalUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Invalid zip: {e}") from e
 

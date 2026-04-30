@@ -8,10 +8,15 @@ from typing import BinaryIO
 
 from PIL import Image
 
+from .background import remove_background
+
 # Pillow format names (canonical, uppercase).
 ALLOWED_FORMATS: frozenset[str] = frozenset(
     {"WEBP", "PNG", "JPEG", "GIF", "BMP", "TIFF"}
 )
+
+# Formats that can encode an alpha channel; required when removing backgrounds.
+ALPHA_CAPABLE_FORMATS: frozenset[str] = frozenset({"WEBP", "PNG", "GIF", "TIFF"})
 
 # File extensions we recognize as image inputs (lowercase, no dot).
 IMAGE_EXTS: frozenset[str] = frozenset(
@@ -111,6 +116,7 @@ def convert_image(
     target_format: str,
     width: int | None = None,
     height: int | None = None,
+    remove_bg: bool = False,
 ) -> bytes:
     """Convert *src* to *target_format*, optionally resizing.
 
@@ -120,6 +126,8 @@ def convert_image(
         width: Target width in pixels. If only one of width/height is given,
             the other is derived to preserve aspect ratio.
         height: Target height in pixels.
+        remove_bg: If True, remove the background before resizing/encoding.
+            Requires the ``bgremove`` extra and an alpha-capable target format.
 
     Returns:
         The encoded image as bytes.
@@ -130,10 +138,36 @@ def convert_image(
     """
     fmt = normalize_format(target_format)
 
-    if isinstance(src, bytes):
-        src = BytesIO(src)
+    if remove_bg and fmt not in ALPHA_CAPABLE_FORMATS:
+        allowed = ", ".join(sorted(ALPHA_CAPABLE_FORMATS))
+        raise ValueError(
+            f"remove_bg requires an alpha-capable target format ({allowed}); "
+            f"got {fmt}."
+        )
 
-    with Image.open(src) as img:
+    # Materialize raw bytes once so background removal (which needs bytes)
+    # and Pillow can both consume the same input.
+    if isinstance(src, bytes):
+        raw = src
+    elif isinstance(src, (str, Path)):
+        raw = Path(src).read_bytes()
+    else:
+        raw = src.read()
+
+    if remove_bg:
+        img = remove_background(raw)
+        try:
+            new_size = _compute_size(img.size, width, height)
+            if new_size is not None:
+                img = img.resize(new_size, Image.LANCZOS)
+            img = _prepare_for_format(img, fmt)
+            buf = BytesIO()
+            img.save(buf, format=fmt)
+            return buf.getvalue()
+        finally:
+            img.close()
+
+    with Image.open(BytesIO(raw)) as img:
         img.load()
         new_size = _compute_size(img.size, width, height)
         if new_size is not None:

@@ -165,6 +165,13 @@
       </div>
     </div>
 
+    <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+      <input type="checkbox" id="remove-bg" />
+      <label for="remove-bg" style="margin: 0; color: var(--text); font-size: 13px; cursor: pointer;">
+        Remove background <span style="color: var(--muted);">(slower; forces alpha-capable format)</span>
+      </label>
+    </div>
+
     <div class="actions">
       <button class="primary" id="submit" disabled>Convert</button>
       <span class="status" id="status"></span>
@@ -230,6 +237,18 @@
     render();
   });
 
+  // Force alpha-capable format when bg removal is on; disable JPEG/BMP options.
+  const removeBg = document.getElementById("remove-bg");
+  const formatSel = document.getElementById("format");
+  const ALPHA_OK = new Set(["webp", "png", "gif", "tiff"]);
+  removeBg.addEventListener("change", () => {
+    const on = removeBg.checked;
+    for (const opt of formatSel.options) {
+      opt.disabled = on && !ALPHA_OK.has(opt.value);
+    }
+    if (on && !ALPHA_OK.has(formatSel.value)) formatSel.value = "png";
+  });
+
   function downloadBlob(blob, name) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -274,6 +293,7 @@
     const h = document.getElementById("height").value;
     if (w) fd.append("width", w);
     if (h) fd.append("height", h);
+    if (document.getElementById("remove-bg").checked) fd.append("remove_bg", "true");
 
     submit.disabled = true;
     statusEl.className = "status";

@@ -66,6 +66,7 @@ def convert_zip(
     target_format: str,
     width: int | None = None,
     height: int | None = None,
+    remove_bg: bool = False,
 ) -> tuple[bytes, ConversionReport]:
     """Convert every image inside *src_zip* and return a new zip.
 
@@ -104,6 +105,7 @@ def convert_zip(
                     target_format=fmt,
                     width=width,
                     height=height,
+                    remove_bg=remove_bg,
                 )
             except UnidentifiedImageError:
                 report.failed.append((safe, "not a recognizable image"))
@@ -124,6 +126,7 @@ def convert_many(
     target_format: str,
     width: int | None = None,
     height: int | None = None,
+    remove_bg: bool = False,
 ) -> tuple[bytes, ConversionReport]:
     """Convert an iterable of ``(filename, data)`` pairs into a single zip."""
     fmt = normalize_format(target_format)
@@ -143,6 +146,7 @@ def convert_many(
                     target_format=fmt,
                     width=width,
                     height=height,
+                    remove_bg=remove_bg,
                 )
             except UnidentifiedImageError:
                 report.failed.append((safe, "not a recognizable image"))

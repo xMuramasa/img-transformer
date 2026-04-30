@@ -49,8 +49,8 @@ docker run --rm -p 8000:8000 img-transformer
 ## API
 
 All endpoints accept `multipart/form-data` with form fields
-`target_format` (one of `webp`, `png`, `jpeg`, `gif`, `bmp`, `tiff`) and
-optional `width` / `height` integers.
+`target_format` (one of `webp`, `png`, `jpeg`, `gif`, `bmp`, `tiff`),
+optional `width` / `height` integers, and optional `remove_bg` (boolean).
 
 | Method | Path                  | File field | Response                  |
 | ------ | --------------------- | ---------- | ------------------------- |
@@ -61,6 +61,19 @@ optional `width` / `height` integers.
 
 Bulk endpoints include a JSON `X-Conversion-Report` header summarizing
 converted / skipped / failed entries.
+
+### Background removal (optional)
+
+Install the extra to enable the `remove_bg` flag (uses [`rembg`](https://github.com/danielgatis/rembg)
+with the U2Net ONNX model, ~170 MB downloaded on first use):
+
+```bash
+uv sync --extra bgremove
+```
+
+When `remove_bg=true`, the target format must be alpha-capable
+(`webp`, `png`, `gif`, `tiff`). Without the extra installed, the endpoints
+return `503` with a clear message.
 
 ### Limits
 
