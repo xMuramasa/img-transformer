@@ -58,13 +58,14 @@ All endpoints accept `multipart/form-data` with form fields
 `target_format` (one of `webp`, `png`, `jpeg`, `gif`, `bmp`, `tiff`),
 optional `width` / `height` integers, and optional `remove_bg` (boolean).
 
-| Method | Path                  | File field | Response                  |
-| ------ | --------------------- | ---------- | ------------------------- |
-| POST   | `/api/convert/image`  | `file`     | converted image           |
-| POST   | `/api/optimize/pdf`   | `file`     | optimized jpg/png image   |
-| POST   | `/api/convert/files`  | `files[]`  | zip of converted images   |
-| POST   | `/api/convert/zip`    | `file`     | zip of converted images   |
-| GET    | `/healthz`            | —          | `{"status": "ok"}`        |
+| Method | Path                      | File field | Response                  |
+| ------ | ------------------------- | ---------- | ------------------------- |
+| POST   | `/api/convert/image`      | `file`     | converted image           |
+| POST   | `/api/optimize/pdf`       | `file`     | optimized jpg/png image   |
+| POST   | `/api/optimize/pdf/files` | `files[]`  | zip of optimized images   |
+| POST   | `/api/convert/files`      | `files[]`  | zip of converted images   |
+| POST   | `/api/convert/zip`        | `file`     | zip of converted images   |
+| GET    | `/healthz`                | —          | `{"status": "ok"}`        |
 
 Bulk endpoints include a JSON `X-Conversion-Report` header summarizing
 converted / skipped / failed entries.
@@ -81,6 +82,9 @@ and optional fields:
 The response includes an `X-Optimization-Result` header with optimization
 metadata (sizes, dimensions, reduction percentage, selected output format,
 and processing duration).
+
+`/api/optimize/pdf/files` accepts the same PDF optimization options and returns
+a zip archive of optimized `.jpg` / `.png` assets.
 
 ### Background removal (optional)
 

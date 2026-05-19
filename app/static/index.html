@@ -245,7 +245,7 @@
   function modeConfig(mode) {
     if (mode === "image") return { multiple: false, accept: "image/*", url: "/api/convert/image", filePart: "file", label: "Drop an image here or click to choose" };
     if (mode === "files") return { multiple: true,  accept: "image/*", url: "/api/convert/files", filePart: "files", label: "Drop one or more images, or click to choose" };
-    if (mode === "pdf")   return { multiple: false, accept: "image/*", url: "/api/optimize/pdf",   filePart: "file", label: "Drop an image to optimize for PDF embedding" };
+    if (mode === "pdf")   return { multiple: true, accept: "image/*", url: "/api/optimize/pdf/files", filePart: "files", label: "Drop one or more images to optimize for PDF embedding" };
     return { multiple: false, accept: ".zip,application/zip", url: "/api/convert/zip", filePart: "file", label: "Drop a .zip here or click to choose" };
   }
 
@@ -288,9 +288,20 @@
     render();
   });
   input.addEventListener("change", () => {
-    state.files = Array.from(input.files);
+    const cfg = modeConfig(state.mode);
+    const selected = Array.from(input.files);
+    state.files = cfg.multiple ? selected : selected.slice(0, 1);
     render();
   });
+
+  function pdfRequestConfig() {
+    const isSingle = state.mode === "pdf" && state.files.length === 1;
+    return {
+      url: isSingle ? "/api/optimize/pdf" : "/api/optimize/pdf/files",
+      filePart: isSingle ? "file" : "files",
+      fallback: isSingle ? "optimized" : "optimized-for-pdf.zip",
+    };
+  }
 
   // Force alpha-capable format when bg removal is on; disable JPEG/BMP options.
   const removeBg = document.getElementById("remove-bg");
@@ -358,11 +369,12 @@
     const cfg = modeConfig(state.mode);
     if (state.files.length === 0) return;
 
+    const activeCfg = state.mode === "pdf" ? { ...cfg, ...pdfRequestConfig() } : cfg;
     const fd = new FormData();
-    if (cfg.multiple) {
-      for (const f of state.files) fd.append(cfg.filePart, f);
+    if (activeCfg.multiple) {
+      for (const f of state.files) fd.append(activeCfg.filePart, f);
     } else {
-      fd.append(cfg.filePart, state.files[0]);
+      fd.append(activeCfg.filePart, state.files[0]);
     }
     if (state.mode === "pdf") {
       fd.append("max_width",     document.getElementById("pdf-max-width").value     || "1400");
@@ -385,14 +397,18 @@
     optResultEl.classList.remove("visible");
 
     try {
-      const res = await fetch(cfg.url, { method: "POST", body: fd });
+      const res = await fetch(activeCfg.url, { method: "POST", body: fd });
       if (!res.ok) {
         let msg = `${res.status} ${res.statusText}`;
         try { const j = await res.json(); if (j.detail) msg = j.detail; } catch {}
         throw new Error(msg);
       }
       const blob = await res.blob();
-      const fallback = state.mode === "image" || state.mode === "pdf" ? "converted" : "converted.zip";
+      const fallback = state.mode === "image"
+        ? "converted"
+        : state.mode === "pdf"
+          ? activeCfg.fallback
+          : "converted.zip";
       downloadBlob(blob, filenameFromHeaders(res.headers, fallback));
       statusEl.className = "status ok";
       statusEl.textContent = "Done.";

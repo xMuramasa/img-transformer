@@ -106,6 +106,30 @@ def test_optimize_pdf_endpoint_success():
     assert payload["selected_output_format"] in {"jpg", "png"}
 
 
+def test_optimize_pdf_files_endpoint_success():
+    r = client.post(
+        "/api/optimize/pdf/files",
+        data={"max_width": "1200", "jpeg_quality": "68", "png_colors": "64"},
+        files=[
+            ("files", ("photo-a.png", _make_photo_like(), "image/png")),
+            ("files", ("photo-b.png", _make_photo_like((1600, 900)), "image/png")),
+        ],
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+
+    report = json.loads(r.headers["X-Conversion-Report"])
+    assert sorted(report["converted"]) == ["photo-a.png", "photo-b.png"]
+    assert report["failed"] == []
+    assert report["skipped"] == []
+
+    with zipfile.ZipFile(BytesIO(r.content)) as z:
+        names = sorted(z.namelist())
+        assert len(names) == 2
+        assert {name.rsplit(".", 1)[0] for name in names} == {"photo-a", "photo-b"}
+        assert {name.rsplit(".", 1)[1] for name in names} <= {"jpg", "png"}
+
+
 def test_optimize_pdf_endpoint_rejects_invalid_input():
     r = client.post(
         "/api/optimize/pdf",

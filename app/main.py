@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 import json
 import tempfile
 from io import BytesIO
 from pathlib import Path
+import zipfile
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -37,6 +38,22 @@ MAX_ZIP_BYTES = 200 * 1024 * 1024    # 200 MB zip upload
 app = FastAPI(title="img-transformer", version="0.1.0")
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+
+@dataclass
+class PdfBatchOptimizationReport:
+    """Summary of a batch PDF optimization run."""
+
+    converted: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "converted": list(self.converted),
+            "skipped": list(self.skipped),
+            "failed": [{"name": name, "error": error} for name, error in self.failed],
+        }
 
 
 # --- Helpers -------------------------------------------------------------
@@ -94,6 +111,11 @@ async def _read_capped(upload: UploadFile, cap: int) -> bytes:
 def _attachment(name: str) -> dict[str, str]:
     safe = name.replace('"', "")
     return {"Content-Disposition": f'attachment; filename="{safe}"'}
+
+
+def _output_name(name: str, ext: str) -> str:
+    stem = Path(name).stem or "image"
+    return f"{stem}.{ext}"
 
 
 # --- Routes --------------------------------------------------------------
@@ -189,6 +211,85 @@ async def api_optimize_pdf_image(
         headers={
             **_attachment(out_name),
             "X-Optimization-Result": json.dumps(result_payload),
+        },
+    )
+
+
+@app.post("/api/optimize/pdf/files")
+async def api_optimize_pdf_images(
+    files: list[UploadFile] = File(...),
+    max_width: int = Form(1400),
+    jpeg_quality: int = Form(68),
+    png_colors: int = Form(64),
+    grayscale: bool = Form(False),
+    max_pixels: int = Form(40_000_000),
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+
+    opts = _parse_pdf_options(max_width, jpeg_quality, png_colors, grayscale, max_pixels)
+    report = PdfBatchOptimizationReport()
+    out_buf = BytesIO()
+    total = 0
+
+    with tempfile.TemporaryDirectory(prefix="img-transformer-batch-") as tmp:
+        tmp_path = Path(tmp)
+        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as archive:
+            for upload in files:
+                original_name = Path(upload.filename or "image").name or "image"
+                if not original_name:
+                    report.skipped.append("image")
+                    continue
+
+                try:
+                    data = await upload.read()
+                except Exception as e:  # noqa: BLE001
+                    report.failed.append((original_name, str(e)))
+                    continue
+
+                total += len(data)
+                if total > MAX_FILES_TOTAL:
+                    raise HTTPException(status_code=413, detail="Combined upload too large.")
+
+                if not data:
+                    report.failed.append((original_name, "empty upload"))
+                    continue
+
+                source_path = tmp_path / original_name
+                output_path = tmp_path / f"{Path(original_name).stem or 'image'}.optimized"
+
+                try:
+                    source_path.write_bytes(data)
+                    result = await run_in_threadpool(
+                        optimize_image_for_pdf,
+                        str(source_path),
+                        str(output_path),
+                        max_width=opts.max_width,
+                        jpeg_quality=opts.jpeg_quality,
+                        png_colors=opts.png_colors,
+                        grayscale=opts.grayscale,
+                        max_pixels=opts.max_pixels,
+                    )
+                    archive.writestr(
+                        _output_name(original_name, result.selected_output_format),
+                        Path(result.output_path).read_bytes(),
+                    )
+                    report.converted.append(original_name)
+                except OversizedImageError as e:
+                    report.failed.append((original_name, str(e)))
+                except (
+                    UnsupportedImageFormatError,
+                    CorruptedImageError,
+                    ImageOptimizationError,
+                ) as e:
+                    report.failed.append((original_name, str(e)))
+
+    return StreamingResponse(
+        BytesIO(out_buf.getvalue()),
+        media_type="application/zip",
+        headers={
+            **_attachment("optimized-for-pdf.zip"),
+            "X-Conversion-Report": json.dumps(report.as_dict()),
         },
     )
 
