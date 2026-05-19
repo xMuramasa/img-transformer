@@ -12,6 +12,15 @@ from .image import (
 )
 from .archive import ConversionReport, convert_many, convert_zip
 from .background import BackgroundRemovalUnavailable, remove_background
+from .pdf_optimizer import (
+    CorruptedImageError,
+    ImageOptimizationError,
+    OptimizationResult,
+    OversizedImageError,
+    UnsupportedImageFormatError,
+    optimize_image_for_pdf,
+    optimize_many_for_pdf,
+)
 
 __all__ = [
     "IMAGE_EXTS",
@@ -19,9 +28,16 @@ __all__ = [
     "ALPHA_CAPABLE_FORMATS",
     "BackgroundRemovalUnavailable",
     "ConversionReport",
+    "CorruptedImageError",
+    "ImageOptimizationError",
     "convert_image",
     "convert_many",
     "convert_zip",
     "normalize_format",
+    "OptimizationResult",
+    "optimize_image_for_pdf",
+    "optimize_many_for_pdf",
+    "OversizedImageError",
     "remove_background",
+    "UnsupportedImageFormatError",
 ]

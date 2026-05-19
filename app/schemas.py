@@ -31,3 +31,13 @@ class ConvertOptions(BaseModel):
             raise ValueError(
                 f"remove_bg requires an alpha-capable target format ({allowed})."
             )
+
+
+class PdfOptimizeOptions(BaseModel):
+    """Options for PDF-safe image optimization."""
+
+    max_width: int = Field(1400, ge=1, le=20_000)
+    jpeg_quality: int = Field(68, ge=30, le=95)
+    png_colors: int = Field(64, ge=2, le=256)
+    grayscale: bool = Field(False)
+    max_pixels: int = Field(40_000_000, ge=1, le=200_000_000)

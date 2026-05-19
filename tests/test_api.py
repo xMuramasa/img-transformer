@@ -13,6 +13,16 @@ from tests._helpers import make_png
 client = TestClient(app)
 
 
+def _make_photo_like(size: tuple[int, int] = (1800, 1100)) -> bytes:
+    red = Image.linear_gradient("L").resize(size)
+    green = Image.radial_gradient("L").resize(size)
+    blue = Image.effect_noise(size, 90)
+    img = Image.merge("RGB", (red, green, blue))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
 def test_healthz():
     r = client.get("/healthz")
     assert r.status_code == 200
@@ -80,3 +90,25 @@ def test_convert_zip_endpoint():
     assert r.status_code == 200
     with zipfile.ZipFile(BytesIO(r.content)) as z:
         assert z.namelist() == ["img.webp"]
+
+
+def test_optimize_pdf_endpoint_success():
+    r = client.post(
+        "/api/optimize/pdf",
+        data={"max_width": "1200", "jpeg_quality": "68", "png_colors": "64"},
+        files={"file": ("photo.png", _make_photo_like(), "image/png")},
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/")
+    assert "X-Optimization-Result" in r.headers
+    payload = json.loads(r.headers["X-Optimization-Result"])
+    assert payload["final_dimensions"][0] <= 1200
+    assert payload["selected_output_format"] in {"jpg", "png"}
+
+
+def test_optimize_pdf_endpoint_rejects_invalid_input():
+    r = client.post(
+        "/api/optimize/pdf",
+        files={"file": ("not-image.png", b"bad-image-bytes", "image/png")},
+    )
+    assert r.status_code == 400

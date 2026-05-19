@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
+import tempfile
 from io import BytesIO
 from pathlib import Path
 
@@ -13,8 +15,17 @@ from fastapi.staticfiles import StaticFiles
 from PIL import UnidentifiedImageError
 from pydantic import ValidationError
 
-from app.schemas import ConvertOptions
-from transform import convert_image, convert_many, convert_zip
+from app.schemas import ConvertOptions, PdfOptimizeOptions
+from transform import (
+    CorruptedImageError,
+    ImageOptimizationError,
+    OversizedImageError,
+    UnsupportedImageFormatError,
+    convert_image,
+    convert_many,
+    convert_zip,
+    optimize_image_for_pdf,
+)
 from transform.background import BackgroundRemovalUnavailable
 from transform.image import extension_for
 
@@ -43,6 +54,25 @@ def _parse_options(
             remove_bg=remove_bg,
         )
     except (ValidationError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _parse_pdf_options(
+    max_width: int,
+    jpeg_quality: int,
+    png_colors: int,
+    grayscale: bool,
+    max_pixels: int,
+) -> PdfOptimizeOptions:
+    try:
+        return PdfOptimizeOptions(
+            max_width=max_width,
+            jpeg_quality=jpeg_quality,
+            png_colors=png_colors,
+            grayscale=grayscale,
+            max_pixels=max_pixels,
+        )
+    except ValidationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -105,6 +135,61 @@ async def api_convert_image(
         BytesIO(out),
         media_type=media_type,
         headers=_attachment(out_name),
+    )
+
+
+@app.post("/api/optimize/pdf")
+async def api_optimize_pdf_image(
+    file: UploadFile = File(...),
+    max_width: int = Form(1400),
+    jpeg_quality: int = Form(68),
+    png_colors: int = Form(64),
+    grayscale: bool = Form(False),
+    max_pixels: int = Form(40_000_000),
+):
+    opts = _parse_pdf_options(max_width, jpeg_quality, png_colors, grayscale, max_pixels)
+    data = await _read_capped(file, MAX_IMAGE_BYTES)
+    original_name = file.filename or "image"
+    stem = Path(original_name).stem or "image"
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="img-transformer-") as tmp:
+            tmp_path = Path(tmp)
+            src_path = tmp_path / original_name
+            out_path = tmp_path / f"{stem}.optimized"
+            src_path.write_bytes(data)
+
+            result = await run_in_threadpool(
+                optimize_image_for_pdf,
+                str(src_path),
+                str(out_path),
+                max_width=opts.max_width,
+                jpeg_quality=opts.jpeg_quality,
+                png_colors=opts.png_colors,
+                grayscale=opts.grayscale,
+                max_pixels=opts.max_pixels,
+            )
+            output_bytes = Path(result.output_path).read_bytes()
+
+    except OversizedImageError as e:
+        raise HTTPException(status_code=413, detail=str(e)) from e
+    except (UnsupportedImageFormatError, CorruptedImageError, ImageOptimizationError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    out_ext = result.selected_output_format
+    media_type = "image/jpeg" if out_ext == "jpg" else "image/png"
+    out_name = f"{stem}.{out_ext}"
+    result_payload = asdict(result)
+    result_payload["output_path"] = out_name
+    result_payload["input_path"] = original_name
+
+    return StreamingResponse(
+        BytesIO(output_bytes),
+        media_type=media_type,
+        headers={
+            **_attachment(out_name),
+            "X-Optimization-Result": json.dumps(result_payload),
+        },
     )
 
 
