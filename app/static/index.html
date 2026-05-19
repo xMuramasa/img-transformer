@@ -122,18 +122,34 @@
   }
   .report.visible { display: block; }
   .report strong { color: var(--text); }
+  .opt-result {
+    margin-top: 16px;
+    padding: 12px 14px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--muted);
+    display: none;
+  }
+  .opt-result.visible { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+  .opt-result .row { display: contents; }
+  .opt-result .lbl { color: var(--muted); }
+  .opt-result .val { color: var(--text); font-weight: 500; }
+  .opt-result .reduction { color: var(--ok); font-weight: 600; }
 </style>
 </head>
 <body>
 <header>
   <h1>img-transformer</h1>
-  <p>Convert and resize images locally. Single file, multiple files, or a zip archive.</p>
+  <p>Convert and resize images locally, or optimize for PDF embedding.</p>
 </header>
 <main>
   <div class="tabs">
     <button class="tab active" data-mode="image">Single image</button>
     <button class="tab" data-mode="files">Multiple files</button>
     <button class="tab" data-mode="zip">Zip archive</button>
+    <button class="tab" data-mode="pdf">PDF optimize</button>
   </div>
 
   <div class="panel">
@@ -143,33 +159,62 @@
       <div class="files" id="files"></div>
     </div>
 
-    <div class="options">
-      <div>
-        <label for="format">Target format</label>
-        <select id="format">
-          <option value="webp" selected>WebP</option>
-          <option value="png">PNG</option>
-          <option value="jpeg">JPEG</option>
-          <option value="gif">GIF</option>
-          <option value="bmp">BMP</option>
-          <option value="tiff">TIFF</option>
-        </select>
+    <div id="convert-options">
+      <div class="options">
+        <div>
+          <label for="format">Target format</label>
+          <select id="format">
+            <option value="webp" selected>WebP</option>
+            <option value="png">PNG</option>
+            <option value="jpeg">JPEG</option>
+            <option value="gif">GIF</option>
+            <option value="bmp">BMP</option>
+            <option value="tiff">TIFF</option>
+          </select>
+        </div>
+        <div>
+          <label for="width">Width (px, optional)</label>
+          <input type="number" id="width" min="1" placeholder="auto" />
+        </div>
+        <div>
+          <label for="height">Height (px, optional)</label>
+          <input type="number" id="height" min="1" placeholder="auto" />
+        </div>
       </div>
-      <div>
-        <label for="width">Width (px, optional)</label>
-        <input type="number" id="width" min="1" placeholder="auto" />
-      </div>
-      <div>
-        <label for="height">Height (px, optional)</label>
-        <input type="number" id="height" min="1" placeholder="auto" />
+      <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="remove-bg" />
+        <label for="remove-bg" style="margin: 0; color: var(--text); font-size: 13px; cursor: pointer;">
+          Remove background <span style="color: var(--muted);">(slower; forces alpha-capable format)</span>
+        </label>
       </div>
     </div>
 
-    <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
-      <input type="checkbox" id="remove-bg" />
-      <label for="remove-bg" style="margin: 0; color: var(--text); font-size: 13px; cursor: pointer;">
-        Remove background <span style="color: var(--muted);">(slower; forces alpha-capable format)</span>
-      </label>
+    <div id="pdf-options" style="display:none">
+      <div class="options">
+        <div>
+          <label for="pdf-max-width">Max width (px)</label>
+          <input type="number" id="pdf-max-width" min="1" max="20000" value="1400" />
+        </div>
+        <div>
+          <label for="pdf-jpeg-quality">JPEG quality (30–95)</label>
+          <input type="number" id="pdf-jpeg-quality" min="30" max="95" value="68" />
+        </div>
+        <div>
+          <label for="pdf-png-colors">PNG palette colors (2–256)</label>
+          <input type="number" id="pdf-png-colors" min="2" max="256" value="64" />
+        </div>
+      </div>
+      <div style="margin-top: 12px; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="pdf-grayscale" />
+        <label for="pdf-grayscale" style="margin: 0; color: var(--text); font-size: 13px; cursor: pointer;">
+          Grayscale <span style="color: var(--muted);">(for scans, receipts, monochrome documents)</span>
+        </label>
+      </div>
+      <p style="margin: 10px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5;">
+        Auto-selects JPEG or PNG per image content. Strips metadata, corrects orientation,
+        and resizes to fit max width. Output is always <code style="color:var(--text)">.jpg</code>
+        or <code style="color:var(--text)">.png</code>.
+      </p>
     </div>
 
     <div class="actions">
@@ -178,6 +223,7 @@
     </div>
 
     <div class="report" id="report"></div>
+    <div class="opt-result" id="opt-result"></div>
   </div>
 </main>
 
@@ -192,10 +238,14 @@
   const submit = document.getElementById("submit");
   const statusEl = document.getElementById("status");
   const reportEl = document.getElementById("report");
+  const optResultEl = document.getElementById("opt-result");
+  const convertOpts = document.getElementById("convert-options");
+  const pdfOpts = document.getElementById("pdf-options");
 
   function modeConfig(mode) {
     if (mode === "image") return { multiple: false, accept: "image/*", url: "/api/convert/image", filePart: "file", label: "Drop an image here or click to choose" };
     if (mode === "files") return { multiple: true,  accept: "image/*", url: "/api/convert/files", filePart: "files", label: "Drop one or more images, or click to choose" };
+    if (mode === "pdf")   return { multiple: false, accept: "image/*", url: "/api/optimize/pdf",   filePart: "file", label: "Drop an image to optimize for PDF embedding" };
     return { multiple: false, accept: ".zip,application/zip", url: "/api/convert/zip", filePart: "file", label: "Drop a .zip here or click to choose" };
   }
 
@@ -208,6 +258,10 @@
       ? state.files.map(f => `${f.name} (${(f.size/1024).toFixed(1)} KB)`).join(", ")
       : "";
     submit.disabled = state.files.length === 0;
+    submit.textContent = state.mode === "pdf" ? "Optimize for PDF" : "Convert";
+    const isPdf = state.mode === "pdf";
+    convertOpts.style.display = isPdf ? "none" : "";
+    pdfOpts.style.display    = isPdf ? "" : "none";
   }
 
   tabs.forEach(t => t.addEventListener("click", () => {
@@ -218,6 +272,7 @@
     statusEl.textContent = "";
     statusEl.className = "status";
     reportEl.classList.remove("visible");
+    optResultEl.classList.remove("visible");
     render();
   }));
 
@@ -278,6 +333,27 @@
     } catch { /* ignore */ }
   }
 
+  function showOptResult(headers) {
+    const raw = headers.get("X-Optimization-Result");
+    if (!raw) return;
+    try {
+      const r = JSON.parse(raw);
+      const kb = n => (n / 1024).toFixed(1) + " KB";
+      const pct = r.reduction_percentage.toFixed(1);
+      const dim = d => `${d[0]} × ${d[1]}`;
+      const ms = r.processing_duration_ms.toFixed(0);
+      optResultEl.innerHTML =
+        `<span class="lbl">Format selected</span><span class="val">${r.selected_output_format.toUpperCase()}</span>` +
+        `<span class="lbl">Original size</span><span class="val">${kb(r.original_size)}</span>` +
+        `<span class="lbl">Optimized size</span><span class="val">${kb(r.optimized_size)}</span>` +
+        `<span class="lbl">Reduction</span><span class="val reduction">−${pct}%</span>` +
+        `<span class="lbl">Original dimensions</span><span class="val">${dim(r.original_dimensions)}</span>` +
+        `<span class="lbl">Final dimensions</span><span class="val">${dim(r.final_dimensions)}</span>` +
+        `<span class="lbl">Processing time</span><span class="val">${ms} ms</span>`;
+      optResultEl.classList.add("visible");
+    } catch { /* ignore */ }
+  }
+
   submit.addEventListener("click", async () => {
     const cfg = modeConfig(state.mode);
     if (state.files.length === 0) return;
@@ -288,17 +364,25 @@
     } else {
       fd.append(cfg.filePart, state.files[0]);
     }
-    fd.append("target_format", document.getElementById("format").value);
-    const w = document.getElementById("width").value;
-    const h = document.getElementById("height").value;
-    if (w) fd.append("width", w);
-    if (h) fd.append("height", h);
-    if (document.getElementById("remove-bg").checked) fd.append("remove_bg", "true");
+    if (state.mode === "pdf") {
+      fd.append("max_width",     document.getElementById("pdf-max-width").value     || "1400");
+      fd.append("jpeg_quality",  document.getElementById("pdf-jpeg-quality").value  || "68");
+      fd.append("png_colors",    document.getElementById("pdf-png-colors").value    || "64");
+      fd.append("grayscale",     document.getElementById("pdf-grayscale").checked ? "true" : "false");
+    } else {
+      fd.append("target_format", document.getElementById("format").value);
+      const w = document.getElementById("width").value;
+      const h = document.getElementById("height").value;
+      if (w) fd.append("width", w);
+      if (h) fd.append("height", h);
+      if (document.getElementById("remove-bg").checked) fd.append("remove_bg", "true");
+    }
 
     submit.disabled = true;
     statusEl.className = "status";
-    statusEl.textContent = "Converting…";
+    statusEl.textContent = state.mode === "pdf" ? "Optimizing…" : "Converting…";
     reportEl.classList.remove("visible");
+    optResultEl.classList.remove("visible");
 
     try {
       const res = await fetch(cfg.url, { method: "POST", body: fd });
@@ -308,11 +392,12 @@
         throw new Error(msg);
       }
       const blob = await res.blob();
-      const fallback = state.mode === "image" ? "converted" : "converted.zip";
+      const fallback = state.mode === "image" || state.mode === "pdf" ? "converted" : "converted.zip";
       downloadBlob(blob, filenameFromHeaders(res.headers, fallback));
       statusEl.className = "status ok";
       statusEl.textContent = "Done.";
       showReport(res.headers);
+      showOptResult(res.headers);
     } catch (e) {
       statusEl.className = "status err";
       statusEl.textContent = `Error: ${e.message}`;
