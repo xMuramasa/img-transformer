@@ -1,13 +1,57 @@
-# img-transformer
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="img-transformer: convert, resize and squeeze images" width="100%" />
+</p>
 
-A small FastAPI web app to convert and resize images. Supports three input
-modes:
+<p align="center">
+  <a href="https://github.com/xMuramasa/img-transformer/actions/workflows/ci.yml"><img src="https://github.com/xMuramasa/img-transformer/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/Pillow-11-1f6feb" alt="Pillow" />
+  <a href="https://docs.astral.sh/uv/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="uv" /></a>
+  <a href="#docker"><img src="https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white" alt="Docker ready" /></a>
+  <a href="https://x-muramasa.dev"><img src="https://img.shields.io/badge/demo-x--muramasa.dev-4f8cff" alt="Live demo" /></a>
+</p>
 
-- **Single image** — convert one file (e.g., PNG → WebP).
-- **Multiple files** — upload many images, get a zip of converted ones.
-- **Zip archive** — upload a `.zip`, get a converted `.zip` back.
+<p align="center">
+  A small FastAPI app that converts and resizes images (one file, a batch, or a whole zip archive),<br />
+  strips backgrounds, and shrinks images for embedding in PDFs.
+</p>
+
+---
+
+## Features
+
+- 🖼️ **Single image**: convert one file (e.g. PNG → WebP), optionally resized.
+- 🗂️ **Multiple files**: upload many images, get a zip of converted ones back.
+- 📦 **Zip archive**: upload a `.zip`, get a converted `.zip` back, with a per-file report.
+- 📄 **PDF optimize**: auto-picks JPEG or PNG per image, strips metadata, fixes orientation, caps width.
+- ✂️ **Background removal** (optional): `rembg` + U2Net, for alpha-capable targets.
+- 🧩 **Pure-Python core**: `transform/` has no web dependencies, so it works outside the API too.
+
+Formats: `webp`, `png`, `jpeg`, `gif`, `bmp`, `tiff`.
+
+<p align="center">
+  <img src="docs/assets/ui-convert.png" alt="Single image conversion: a 3000×2000 PNG queued for WebP at 1600px wide" width="49%" />
+  <img src="docs/assets/ui-pdf-optimize.png" alt="PDF optimize: a 5.3 MB PNG reduced to 258 KB (−95.2%)" width="49%" />
+</p>
+<p align="center"><sub>The drag-and-drop UI: a single conversion, and a PDF optimization run (5.3 MB → 258 KB).</sub></p>
+
+> [!TIP]
+> Want to try it without installing anything? The [live demo on x-muramasa.dev](https://x-muramasa.dev)
+> runs the same WebP conversion right in your browser.
 
 Originally a Jupyter notebook (`img_to_webp.ipynb`); now a production-shaped app.
+
+## Quick start
+
+Requires [uv](https://docs.astral.sh/uv/) and Python 3.12.
+
+```bash
+uv sync --extra dev
+uv run uvicorn app.main:app --reload
+```
+
+Then open <http://localhost:8000>.
 
 ## Project layout
 
@@ -19,25 +63,18 @@ app/                 FastAPI surface
 transform/           pure-Python core (no web deps)
   image.py           single-image convert + resize
   archive.py         zip / multi-file conversion
+  background.py      optional background removal (rembg)
+  pdf_optimizer.py   PDF-embedding optimizer
 tests/               pytest suite
 ```
-
-## Run locally
-
-Requires [uv](https://docs.astral.sh/uv/) and Python 3.14+.
-
-```bash
-uv sync --extra dev
-uv run uvicorn app.main:app --reload
-```
-
-Then open <http://localhost:8000>.
 
 ## Tests
 
 ```bash
 uv run pytest
 ```
+
+CI runs the same suite on every push and pull request.
 
 ## Docker
 
@@ -46,15 +83,13 @@ docker build -t img-transformer .
 docker run --rm -p 8000:8000 img-transformer
 ```
 
-Optional: pre-download the `u2net` model during image build (larger image, slower build):
-
-```bash
-docker build --build-arg PRELOAD_U2NET=1 -t img-transformer .
-```
+The image ships with background removal enabled: `rembg` is installed and the U2Net model
+(~170 MB) is downloaded at build time, so the first request doesn't pay for it. The container
+runs as a non-root user.
 
 ## API
 
-All endpoints accept `multipart/form-data` with form fields
+All conversion endpoints accept `multipart/form-data` with form fields
 `target_format` (one of `webp`, `png`, `jpeg`, `gif`, `bmp`, `tiff`),
 optional `width` / `height` integers, and optional `remove_bg` (boolean).
 
@@ -69,6 +104,11 @@ optional `width` / `height` integers, and optional `remove_bg` (boolean).
 
 Bulk endpoints include a JSON `X-Conversion-Report` header summarizing
 converted / skipped / failed entries.
+
+```bash
+curl -F file=@photo.png -F target_format=webp -F width=1600 \
+  http://localhost:8000/api/convert/image -o photo.webp
+```
 
 `/api/optimize/pdf` accepts `multipart/form-data` with the uploaded `file`
 and optional fields:
