@@ -1,0 +1,39 @@
+# Caduceus settings (caduceus SPEC section 6), written by Hermes (no hermes-dispatch profile existed).
+kind = "web-app"
+language = "python"
+model = "sonnet"
+hosts = ["optiplex"]
+rules = [
+  "Test only with `uv run pytest` (UV_OFFLINE is set; the dev extra is in the lock file). Never start the server or a container.",
+  "Uploaded images are user data: tests use generated images in temp dirs only.",
+]
+network = "No network: no WebFetch, WebSearch, curl, wget, pip or uv downloads. Never add or update a dependency."
+
+[env]
+UV_OFFLINE = "1"
+
+[gates]
+test = [
+  "uv run --extra dev pytest",
+]
+
+[access]
+allow = [
+  "Bash(uv run --extra dev pytest*)",
+  "Bash(uv run pytest*)",
+]
+deny = [
+  "Bash(uv add*)",
+  "Bash(uv sync*)",
+  "Bash(uv lock*)",
+  "Bash(uv pip*)",
+  "Bash(pip*)",
+  "Bash(uvx*)",
+  "Bash(docker*)",
+]
+protected = [
+  "Dockerfile",
+  ".github/**",
+  "uv.lock",
+  "pyproject.toml",
+]
